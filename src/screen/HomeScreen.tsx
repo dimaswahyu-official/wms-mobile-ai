@@ -1,17 +1,28 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 
-const HomeScreen = () => {
+// 1. Terima props navigation
+const HomeScreen = ({ navigation }: { navigation: any }) => {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Home Screen</Text>
       <View style={styles.menuContainer}>
-        <TouchableOpacity style={styles.menuButton} onPress={() => {}}>
-          <Text style={styles.menuText}>Menu 1</Text>
+        
+        {/* 2. Tambahkan aksi navigasi pada onPress */}
+        <TouchableOpacity 
+          style={styles.menuButton} 
+          onPress={() => navigation.navigate('WarehouseMap')} 
+        >
+          <Text style={styles.menuText}>WMS Helicopter View</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.menuButton} onPress={() => {}}>
+
+        <TouchableOpacity 
+          style={styles.menuButton} 
+          onPress={() => navigation.navigate('OtherScreen')} // Ganti dengan screen tujuan kedua
+        >
           <Text style={styles.menuText}>Menu 2</Text>
         </TouchableOpacity>
+
       </View>
     </View>
   );
