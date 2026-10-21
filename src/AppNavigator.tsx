@@ -27,7 +27,7 @@ const AppNavigator = () => {
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1317fc' }}>
                 <ActivityIndicator size="large" color="#fff" />
                 <Text style={{ marginTop: 10, fontSize: 18, color: '#fff', fontWeight: '600', letterSpacing: 1 }}>
-                   SCANNER MOBILE APPLICATION
+                   WMS MOBILE VIEW
                 </Text>
             </View>
         );

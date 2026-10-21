@@ -33,6 +33,11 @@ const loadAuthState = async (set: any) => {
     const savedAuthState = await AsyncStorage.getItem('isAuthenticated');
     const savedUser = await AsyncStorage.getItem('user');
     const savedToken = await AsyncStorage.getItem('accessToken');
+    console.log('Loaded auth state from AsyncStorage:', {
+        isAuthenticated: savedAuthState,
+        user: savedUser,
+        accessToken: savedToken,
+    });
     if (savedAuthState) {
         set({ isAuthenticated: JSON.parse(savedAuthState) });
     }

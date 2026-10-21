@@ -53,17 +53,18 @@ export default function LoginScreen() {
         try {
             setLoading(true);
             
-            const response = await AuthServices.login(username, password); // Simulate login API call
+            const responsData = await AuthServices.login(username, password); // Simulate login API call
+            const response = responsData.data; // Assuming the response contains the accessToken
             console.log('Login response:', response);
 
             // Save username to AsyncStorage
             await AsyncStorage.setItem('savedUsername', username);
 
             // Save token to AsyncStorage
-            await AsyncStorage.setItem('accessToken', response.access_token);
+            await AsyncStorage.setItem('accessToken', response.accessToken);
 
             // Update store
-            setToken(response.access_token);
+            setToken(response.accessToken);
             setAuthenticated(true);
 
             Alert.alert('Login Successful', 'You have been logged in successfully!');

@@ -7,7 +7,8 @@ import Toast from 'react-native-toast-message';
 interface LoginResponse {
   success: boolean;
   message: string;
-  access_token: string;
+  accessToken: string;
+  data:any;
 }
 
 
