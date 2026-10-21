@@ -26,7 +26,10 @@ const MainNavigator = () => {
         <Stack.Screen name="InboundList" component={HomeScreen} />
         
         {/* Screen Tujuan yang dipanggil di onPress */}
-        <Stack.Screen name="WarehouseMap" component={WarehouseMap} />
+        <Stack.Screen
+          name="WarehouseMap"
+          component={WarehouseMap as React.ComponentType<any>}
+        />
         <Stack.Screen name="OtherScreen" component={DummyScreen} />
         
       </Stack.Navigator>
