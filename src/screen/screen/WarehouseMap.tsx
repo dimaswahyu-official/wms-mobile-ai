@@ -71,7 +71,7 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
     const [loading, setLoading] = useState<boolean>(false);
     const [loadingGrid, setLoadingGrid] = useState<boolean>(false);
     
-    // 0: Pilih WH, 1: POV Warehouse (Sub), 2: POV Sub (Bin), 3: POV Bin (Pallet)
+    // 0: Pilih WH, 1: POV Warehouse (Sub), 2: POV Sub (Bin), 3: POV Bin/Staging (Pallet)
     const [zoomLevel, setZoomLevel] = useState<number>(0); 
 
     const [currentWeek, setCurrentWeek] = useState<number>(0);
@@ -107,7 +107,6 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
             } else if (sub.is_staging === 'OUTBOUND') {
                 outbound.push(sub);
             } else {
-                // Jika bukan staging dan bukan gate, masuk ke Sub-Warehouse biasa (Kuning)
                 regular.push(sub);
             }
         });
@@ -115,14 +114,16 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
         return { regularSubs: regular, inboundStagings: inbound, outboundStagings: outbound, gates: gateList };
     }, [subWarehouses]);
 
-    // --- COLOR PALETTE ---
+    // --- MODERN MINIMALIST COLOR PALETTE ---
     const COLORS = {
-        warehouse: '#5A9BD5', // Biru
-        sub: '#FDE282',       // Kuning Terang (Sub-Warehouse)
-        bin: '#E6C653',       // Kuning Gelap/Border (Bin)
-        pallet: '#6235B0',    // Ungu
-        staging: '#70AD47',   // Hijau
-        gate: '#FF0000'       // Merah
+        warehouse: '#E0F2FE', // Soft Blue
+        sub: '#FEF9C3',       // Soft Yellow
+        bin: '#FEF08A',       // Vibrant Soft Yellow
+        pallet: '#8B5CF6',    // Modern Purple
+        staging: '#DCFCE7',   // Soft Mint Green
+        gate: '#FEE2E2',      // Soft Blush Red
+        textPrimary: '#1E293B',
+        textSecondary: '#64748B',
     };
 
     useEffect(() => {
@@ -130,6 +131,19 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
         fetchWarehouses();
     }, []);
 
+    // FUNGSI NAVIGASI BACK CERDAS
+    const handleGoBack = () => {
+        if (zoomLevel === 0) {
+            navigation.goBack();
+        } else if (zoomLevel === 3 && (selectedSub?.is_staging || selectedSub?.is_gate)) {
+            // Jika sedang di Level 3 (Pallet) dan itu adalah Staging/Gate (tanpa Bin),
+            // maka langsung kembali ke Level 1 (Floor Plan)
+            setZoomLevel(1);
+        } else {
+            // Selain itu, mundur 1 level secara normal
+            setZoomLevel(zoomLevel - 1);
+        }
+    };
     const fetchCurrentWeek = async () => {
         try {
             const todayStr = getFormattedDate(new Date());
@@ -155,7 +169,7 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
 
     const handleSelectWarehouse = async (wh: any) => {
         setSelectedWarehouse(wh);
-        setZoomLevel(1); // Masuk POV Warehouse
+        setZoomLevel(1); 
         
         if (allSubWarehouses) {
             setSubWarehouses(allSubWarehouses.filter(sub => sub.warehouse_id === wh.id));
@@ -174,36 +188,15 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
         }
     };
 
-    const handleSelectSub = async (sub: any) => {
-        setSelectedSub(sub);
-        setZoomLevel(2); // Masuk POV Sub-Warehouse
-
-        if (allBins) {
-            setBins(allBins.filter(b => b.warehouse_sub_id === sub.id));
-            return;
-        }
-        try {
-            setLoading(true);
-            const res = await ConstantService.getWarehouseBin();
-            setAllBins(res.data);
-            setBins(res.data.filter((b: any) => b.warehouse_sub_id === sub.id));
-        } catch (err) {
-            Alert.alert("Error", "Gagal mengambil data Bin");
-            setZoomLevel(1);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleSelectBin = async (bin: any, forceRefresh = false) => {
-        setSelectedBin(bin);
-        setZoomLevel(3); // Masuk POV Bin (Lihat Pallet)
-
-        const cacheKey = `${selectedSub.id}-${bin.id}`;
+    // FUNGSI UNTUK MENGAMBIL DATA PALLET (DIPISAH AGAR BISA DIGUNAKAN BIN & STAGING)
+    const fetchInventoryData = async (sub: any, bin: any = null, forceRefresh = false) => {
+        const isStaging = !bin; // Jika tidak ada bin, berarti ini staging/gate
+        const cacheKey = isStaging ? `${sub.id}-staging` : `${sub.id}-${bin.id}`;
+        
         setBinInfo({
-            capacity: bin.capacity_pallet || 138,
-            name: bin.name,
-            zone: selectedSub.name,
+            capacity: (bin ? bin.capacity_pallet : sub.capacity_pallet) || 138, // Default ke 138 jika null
+            name: bin ? bin.name : sub.name,
+            zone: sub.name,
             warehouseName: selectedWarehouse.name,
         });
 
@@ -214,7 +207,9 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
 
         try {
             setLoadingGrid(true);
-            const response = await ConstantService.getInventoryTracking(selectedSub.id, bin.id);
+            // Jika staging, kita asumsikan binId dikosongkan (empty string) saat memanggil API
+            const binIdParam = bin ? bin.id : ''; 
+            const response = await ConstantService.getInventoryTracking(sub.id, binIdParam);
             const trackingData: any[] = response.data || [];
 
             const mappedPallets: PalletData[] = trackingData.map((item, index) => {
@@ -246,10 +241,49 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
             setPallets(mappedPallets);
         } catch (error) {
             Alert.alert("Error", "Gagal memuat data Inventory Pallet");
-            setZoomLevel(2);
+            setZoomLevel(isStaging ? 1 : 2); // Kembali ke layar sebelumnya jika gagal
         } finally {
             setLoadingGrid(false);
         }
+    };
+
+    // UPDATE LOGIKA KLIK SUB-WAREHOUSE
+    const handleSelectSub = async (sub: any) => {
+        setSelectedSub(sub);
+        setSelectedBin(null);
+        
+        // 1. CEK JIKA INI STAGING ATAU GATE (TIDAK ADA BIN)
+        if (sub.is_staging || sub.is_gate) {
+            setZoomLevel(3); // Langsung lompat ke Grid Pallet
+            fetchInventoryData(sub, null); // Jalankan fetch tanpa bin
+            return;
+        }
+
+        // 2. JIKA STORAGE BIASA, MASUK KE LEVEL 2 (DAFTAR BIN)
+        setZoomLevel(2); 
+
+        if (allBins) {
+            setBins(allBins.filter(b => b.warehouse_sub_id === sub.id));
+            return;
+        }
+        try {
+            setLoading(true);
+            const res = await ConstantService.getWarehouseBin();
+            setAllBins(res.data);
+            setBins(res.data.filter((b: any) => b.warehouse_sub_id === sub.id));
+        } catch (err) {
+            Alert.alert("Error", "Gagal mengambil data Bin");
+            setZoomLevel(1);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // UPDATE LOGIKA KLIK BIN BIASA
+    const handleSelectBin = (bin: any, forceRefresh = false) => {
+        setSelectedBin(bin);
+        setZoomLevel(3); 
+        fetchInventoryData(selectedSub, bin, forceRefresh);
     };
 
     const gridData = useMemo<GridItem[]>(() => {
@@ -261,10 +295,10 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
     }, [pallets, binInfo.capacity]);
 
     const getSeatColor = useCallback((item: GridItem): string => {
-        if (item.empty) return '#E0E0E0'; // Kosong -> Abu-abu
-        if (currentWeek > 0 && item.oldestWeek && currentWeek - item.oldestWeek >= 3) return '#FF8A80'; // Aging -> Merah
-        if (!item.isFull) return '#FFD54F'; // Partial -> Kuning
-        return COLORS.pallet; // Full -> Ungu
+        if (item.empty) return '#F1F5F9'; // Soft Slate
+        if (currentWeek > 0 && item.oldestWeek && currentWeek - item.oldestWeek >= 3) return '#FDA4AF'; // Soft Rose
+        if (!item.isFull) return '#FDE047'; // Soft Yellow
+        return COLORS.pallet; // Modern Purple
     }, [currentWeek]);
 
     const handlePressSeat = useCallback((item: GridItem) => {
@@ -278,21 +312,34 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
         <SafeAreaView style={styles.container}>
             {/* HEADER & BREADCRUMBS */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => zoomLevel === 0 ? navigation.goBack() : setZoomLevel(zoomLevel - 1)}>
-                    <Text style={styles.backBtn}>{'< Kembali'}</Text>
+                <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
+                    <Text style={styles.backBtnText}>← Kembali</Text>
                 </TouchableOpacity>
                 <Text style={styles.title}>Helicopter View</Text>
                 
                 <View style={styles.breadcrumbContainer}>
-                    <TouchableOpacity onPress={() => setZoomLevel(0)}><Text style={[styles.breadcrumbText, zoomLevel === 0 && styles.breadcrumbActive]}>Semua WH</Text></TouchableOpacity>
-                    {zoomLevel >= 1 && selectedWarehouse && (<TouchableOpacity onPress={() => setZoomLevel(1)}><Text style={[styles.breadcrumbText, zoomLevel === 1 && styles.breadcrumbActive]}>{' > '}{selectedWarehouse.name}</Text></TouchableOpacity>)}
-                    {zoomLevel >= 2 && selectedSub && (<TouchableOpacity onPress={() => setZoomLevel(2)}><Text style={[styles.breadcrumbText, zoomLevel === 2 && styles.breadcrumbActive]}>{' > '}{selectedSub.name}</Text></TouchableOpacity>)}
-                    {zoomLevel === 3 && selectedBin && (<Text style={[styles.breadcrumbText, styles.breadcrumbActive]}>{' > '}{selectedBin.name}</Text>)}
+                    <TouchableOpacity onPress={() => setZoomLevel(0)}>
+                        <Text style={[styles.breadcrumbText, zoomLevel === 0 && styles.breadcrumbActive]}>Semua WH</Text>
+                    </TouchableOpacity>
+                    {zoomLevel >= 1 && selectedWarehouse && (
+                        <TouchableOpacity onPress={() => setZoomLevel(1)}>
+                            <Text style={[styles.breadcrumbText, zoomLevel === 1 && styles.breadcrumbActive]}> / {selectedWarehouse.name}</Text>
+                        </TouchableOpacity>
+                    )}
+                    {zoomLevel >= 2 && selectedSub && (
+                        <TouchableOpacity onPress={() => setZoomLevel(2)}>
+                            <Text style={[styles.breadcrumbText, zoomLevel === 2 && styles.breadcrumbActive]}> / {selectedSub.name}</Text>
+                        </TouchableOpacity>
+                    )}
+                    {/* Hanya tampilkan path Bin jika memang ada bin yang dipilih (Bukan staging) */}
+                    {zoomLevel === 3 && selectedBin && (
+                        <Text style={[styles.breadcrumbText, styles.breadcrumbActive]}> / {selectedBin.name}</Text>
+                    )}
                 </View>
             </View>
 
             <View style={styles.contentArea}>
-                {loading && zoomLevel < 3 && <ActivityIndicator size="large" color="#4A90E2" style={{ marginTop: 20 }} />}
+                {loading && zoomLevel < 3 && <ActivityIndicator size="large" color="#6366F1" style={{ marginTop: 40 }} />}
 
                 {/* --- LEVEL 0: PILIH WAREHOUSE --- */}
                 {!loading && zoomLevel === 0 && (
@@ -300,8 +347,9 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
                         data={warehouses}
                         keyExtractor={(item) => item.id.toString()}
                         numColumns={2}
+                        showsVerticalScrollIndicator={false}
                         renderItem={({ item }) => (
-                            <TouchableOpacity style={styles.boxCard} onPress={() => handleSelectWarehouse(item)}>
+                            <TouchableOpacity style={styles.boxCard} onPress={() => handleSelectWarehouse(item)} activeOpacity={0.8}>
                                 <Text style={styles.boxIcon}>🏢</Text>
                                 <Text style={styles.boxText}>{item.name}</Text>
                             </TouchableOpacity>
@@ -310,7 +358,6 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
                     />
                 )}
 
-                
                 {/* --- LEVEL 1: POV WAREHOUSE (BLUE MAP) --- */}
                 {!loading && zoomLevel === 1 && (
                     <View style={[styles.warehouseMap, { backgroundColor: COLORS.warehouse }]}>
@@ -321,15 +368,16 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
                             {/* Area Inbound Staging (Atas) */}
                             {inboundStagings.length > 0 && (
                                 <View style={styles.inboundSection}>
-                                    <Text style={styles.sectionTitle}>INBOUND STAGING</Text>
+                                    <Text style={styles.sectionTitle}>Inbound Staging</Text>
                                     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                                         {inboundStagings.map((sub) => (
                                             <TouchableOpacity 
                                                 key={sub.id} 
-                                                style={[styles.inboundBox, { backgroundColor: '#FFB74D' }]} 
+                                                style={styles.inboundBox} 
                                                 onPress={() => handleSelectSub(sub)}
+                                                activeOpacity={0.8}
                                             >
-                                                <Text style={styles.subText}>{sub.code || sub.name}</Text>
+                                                <Text style={styles.inboundText}>{sub.code || sub.name}</Text>
                                             </TouchableOpacity>
                                         ))}
                                     </ScrollView>
@@ -337,34 +385,33 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
                             )}
 
                             {/* Area Storage / Sub-Warehouse Biasa (Kuning) */}
-                            <Text style={[styles.sectionTitle, { marginTop: inboundStagings.length > 0 ? 10 : 0 }]}>STORAGE ZONE</Text>
-                            <ScrollView contentContainerStyle={styles.subGrid}>
+                            <Text style={[styles.sectionTitle, { marginTop: inboundStagings.length > 0 ? 12 : 0 }]}>Storage Zone</Text>
+                            <ScrollView contentContainerStyle={styles.subGrid} showsVerticalScrollIndicator={false}>
                                 {regularSubs.map((sub) => (
                                     <TouchableOpacity 
                                         key={sub.id} 
                                         style={[styles.subBox, { backgroundColor: COLORS.sub }]} 
                                         onPress={() => handleSelectSub(sub)}
+                                        activeOpacity={0.8}
                                     >
                                         <Text style={styles.subText}>{sub.name}</Text>
                                     </TouchableOpacity>
                                 ))}
                             </ScrollView>
                         </View>
-
                    
                         {/* KANAN: STAGING OUTBOUND (HIJAU) & GATE (MERAH) */}
-                  
                         <View style={styles.mapRightSection}>
-                            
-                           {/* Kolom 1: STAGING OUTBOUND (Hijau) */}
+                            {/* Kolom 1: STAGING OUTBOUND (Hijau) */}
                             <View style={styles.stagingColumn}>
                                 {outboundStagings.map((stg) => (
                                     <TouchableOpacity 
                                         key={stg.id}
                                         style={[styles.stagingBox, { backgroundColor: COLORS.staging }]}
                                         onPress={() => handleSelectSub(stg)}
+                                        activeOpacity={0.8}
                                     >
-                                        <Text style={[styles.stagingText, { transform: [{ rotate: '-90deg' }], width: 100, textAlign: 'center' }]}>
+                                        <Text style={[styles.stagingText, { transform: [{ rotate: '-90deg' }], width: 80, textAlign: 'center' }]}>
                                             {stg.code || stg.name}
                                         </Text>
                                     </TouchableOpacity>
@@ -378,27 +425,31 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
                                         key={gate.id}
                                         style={[styles.gateBox, { backgroundColor: COLORS.gate }]}
                                         onPress={() => handleSelectSub(gate)}
+                                        activeOpacity={0.8}
                                     >
-                                        <Text style={[styles.stagingText, { fontSize: 10, transform: [{ rotate: '-90deg' }], width: 60, textAlign: 'center' }]}>
+                                        <Text style={[styles.gateText, { transform: [{ rotate: '-90deg' }], width: 60, textAlign: 'center' }]}>
                                             {gate.code || 'GATE'}
                                         </Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>
-
                         </View>
-
                     </View>
                 )}
 
                 {/* --- LEVEL 2: POV SUB-WAREHOUSE (INSIDE YELLOW BOX) --- */}
                 {!loading && zoomLevel === 2 && (
                     <View style={styles.zoomSubContainer}>
-                        <Text style={styles.zoomTitle}>Area: {selectedSub.name}</Text>
-                        <ScrollView contentContainerStyle={styles.binsGridWrapper}>
+                        <View style={styles.zoomHeader}>
+                            <Text style={styles.zoomTitle}>{selectedSub.name}</Text>
+                            <Text style={styles.zoomSubtitle}>Storage Area</Text>
+                        </View>
+                        <ScrollView contentContainerStyle={styles.binsGridWrapper} showsVerticalScrollIndicator={false}>
                             {bins.map((bin) => (
-                                <TouchableOpacity key={bin.id} style={styles.binDetailBox} onPress={() => handleSelectBin(bin)}>
-                                    <Text style={styles.binDetailIcon}>📦</Text>
+                                <TouchableOpacity key={bin.id} style={styles.binDetailBox} onPress={() => handleSelectBin(bin)} activeOpacity={0.8}>
+                                    <View style={styles.binDetailIconWrapper}>
+                                        <Text style={styles.binDetailIcon}>📦</Text>
+                                    </View>
                                     <Text style={styles.binDetailText}>{bin.name}</Text>
                                 </TouchableOpacity>
                             ))}
@@ -406,66 +457,111 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
                     </View>
                 )}
 
-                {/* --- LEVEL 3: POV BIN (PALLET GRID - UNGU) --- */}
+                {/* --- LEVEL 3: POV BIN / STAGING (PALLET GRID - UNGU) --- */}
                 {zoomLevel === 3 && (
                     loadingGrid ? (
                         <ActivityIndicator size="large" color={COLORS.pallet} style={{ marginTop: 50 }} />
                     ) : (
                         <View style={styles.zoomBinContainer}>
                             <View style={styles.infoBar}>
-                                <Text style={styles.subtitle}>Rak: {selectedBin.name} | Kapasitas: {binInfo.capacity}</Text>
-                                <TouchableOpacity onPress={() => handleSelectBin(selectedBin, true)}><Text style={styles.refreshBtn}>🔄 Refresh</Text></TouchableOpacity>
+                                <View>
+                                    {/* Jika tidak ada bin (Staging), tampilkan nama sub-nya, jika ada tampilkan nama bin-nya */}
+                                    <Text style={styles.infoBarTitle}>{binInfo.name}</Text>
+                                    <Text style={styles.infoBarSubtitle}>Kapasitas: {binInfo.capacity} Pallet</Text>
+                                </View>
+                                {/* Tombol Refresh dijalankan sesuai dengan apakah data ini dari Bin atau dari Staging */}
+                                <TouchableOpacity onPress={() => selectedBin ? handleSelectBin(selectedBin, true) : fetchInventoryData(selectedSub, null, true)} style={styles.refreshBtnContainer}>
+                                    <Text style={styles.refreshBtn}>Refresh</Text>
+                                </TouchableOpacity>
                             </View>
                             
                             <View style={styles.legendContainer}>
                                 <View style={styles.legendItem}><View style={[styles.legendBox, { backgroundColor: COLORS.pallet }]} /><Text style={styles.legendText}>Full</Text></View>
-                                <View style={styles.legendItem}><View style={[styles.legendBox, { backgroundColor: '#FFD54F' }]} /><Text style={styles.legendText}>Partial</Text></View>
-                                <View style={styles.legendItem}><View style={[styles.legendBox, { backgroundColor: '#FF8A80' }]} /><Text style={styles.legendText}>Aging</Text></View>
-                                <View style={styles.legendItem}><View style={[styles.legendBox, { backgroundColor: '#E0E0E0' }]} /><Text style={styles.legendText}>Empty</Text></View>
+                                <View style={styles.legendItem}><View style={[styles.legendBox, { backgroundColor: '#FDE047' }]} /><Text style={styles.legendText}>Partial</Text></View>
+                                <View style={styles.legendItem}><View style={[styles.legendBox, { backgroundColor: '#FDA4AF' }]} /><Text style={styles.legendText}>Aging</Text></View>
+                                <View style={styles.legendItem}><View style={[styles.legendBox, { backgroundColor: '#F1F5F9' }]} /><Text style={styles.legendText}>Empty</Text></View>
                             </View>
 
-                            <FlatList
+                          <FlatList
                                 data={gridData}
                                 keyExtractor={(item) => item.slot_index.toString()}
-                                numColumns={5}
+                                numColumns={4}
+                                showsVerticalScrollIndicator={false}
                                 contentContainerStyle={styles.palletGridContent}
-                                renderItem={({ item }) => (
-                                    <TouchableOpacity style={[styles.palletSeat, { backgroundColor: getSeatColor(item) }]} onPress={() => handlePressSeat(item)} activeOpacity={0.7}>
-                                        <Text style={styles.palletSeatText}>{!item.empty && item.code ? item.code.slice(-3) : ''}</Text>
-                                    </TouchableOpacity>
-                                )}
+                                renderItem={({ item }) => {
+                                    const bgColor = getSeatColor(item);
+                                    const isPartial = bgColor === '#FDE047';
+                                    const isGridEmpty = item.empty;
+                                    const txtColor = (bgColor === '#FDE047' || bgColor === '#F1F5F9') ? '#334155' : '#FFFFFF';
+
+                                    return (
+                                        <TouchableOpacity 
+                                            style={[
+                                                styles.palletSeat, 
+                                                { backgroundColor: bgColor },
+                                                !isGridEmpty && styles.palletSeatActive // Tambahkan shadow hanya jika tidak kosong
+                                            ]} 
+                                            onPress={() => handlePressSeat(item)} 
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text 
+                                                style={[styles.palletSeatText, { color: txtColor }]} 
+                                                numberOfLines={1} 
+                                                adjustsFontSizeToFit
+                                            >
+                                                {!isGridEmpty && item.code ? item.code : ''}
+                                            </Text>
+
+                                            {isPartial && item.items && item.items.length > 0 && (
+                                                <View style={[styles.skuList, { borderTopColor: 'rgba(0,0,0,0.06)' }]}>
+                                                    {item.items.slice(0, 3).map((sku, idx) => (
+                                                        <Text key={idx} style={[styles.skuText, { color: txtColor }]} numberOfLines={1}>
+                                                            • {sku.item_name} (W{sku.week})
+                                                        </Text>
+                                                    ))}
+                                                </View>
+                                            )}
+                                        </TouchableOpacity>
+                                    );
+                                }}
                             />
                         </View>
                     )
                 )}
             </View>
 
-            {/* --- MODAL DETAIL --- */}
+            {/* --- MODAL DETAIL (Tetap sama) --- */}
             <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
+                        <View style={styles.modalDragIndicator} />
                         {selectedPallet && (
                             <>
                                 <Text style={styles.modalTitle}>Detail Pallet</Text>
-                                <View style={styles.divider} />
-                                <Text style={styles.modalLabel}>Pallet ID: <Text style={styles.modalValue}>{selectedPallet.code}</Text></Text>
-                                <Text style={styles.modalLabel}>Total Qty: <Text style={styles.modalValue}>{selectedPallet.totalQty} {selectedPallet.uom}</Text></Text>
-                                <Text style={styles.modalLabel}>Oldest Week: <Text style={styles.modalValue}>W-{selectedPallet.oldestWeek}</Text></Text>
+                                <View style={styles.modalDataRow}>
+                                    <Text style={styles.modalLabel}>Pallet ID</Text>
+                                    <Text style={styles.modalValue}>{selectedPallet.code}</Text>
+                                </View>
+                                <View style={styles.modalDataRow}>
+                                    <Text style={styles.modalLabel}>Total Qty</Text>
+                                    <Text style={styles.modalValue}>{selectedPallet.totalQty} {selectedPallet.uom}</Text>
+                                </View>
+                                <View style={styles.modalDataRow}>
+                                    <Text style={styles.modalLabel}>Oldest Week</Text>
+                                    <Text style={styles.modalValue}>W-{selectedPallet.oldestWeek}</Text>
+                                </View>
 
-                                <Text style={[styles.modalLabel, { marginTop: 15, fontWeight: 'bold', color: '#333' }]}>Daftar Isi Item:</Text>
-                                <View style={styles.itemListContainer}>
+                                <Text style={styles.modalListTitle}>Daftar Isi Item</Text>
+                                <ScrollView style={styles.itemListContainer} showsVerticalScrollIndicator={false}>
                                     {selectedPallet.items && selectedPallet.items.length > 0 ? (
                                         selectedPallet.items.map((it, idx) => (
-                                            <View key={idx} style={styles.itemRow}>
-                                                <Text style={styles.itemDot}>•</Text>
-                                                <View>
-                                                    <Text style={styles.itemName}>{it.item_name}</Text>
-                                                    <Text style={styles.itemDetail}>{it.qty} {it.uom} | Week: {it.week}</Text>
-                                                </View>
+                                            <View key={idx} style={styles.itemCard}>
+                                                <Text style={styles.itemName}>{it.item_name}</Text>
+                                                <Text style={styles.itemDetail}>{it.qty} {it.uom} • Week {it.week}</Text>
                                             </View>
                                         ))
-                                    ) : (<Text style={styles.itemDetail}>Pallet Kosong</Text>)}
-                                </View>
+                                    ) : (<Text style={styles.emptyDetail}>Pallet Kosong</Text>)}
+                                </ScrollView>
 
                                 <TouchableOpacity style={styles.closeButton} onPress={() => setModalVisible(false)}>
                                     <Text style={styles.closeButtonText}>Tutup</Text>
@@ -480,133 +576,126 @@ const WarehouseMap: React.FC<Props> = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#FAFAFA' },
-    header: { padding: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderColor: '#F0F0F0' },
-    backBtn: { color: '#4A90E2', fontSize: 16, marginBottom: 8, fontWeight: '600' },
-    title: { fontSize: 22, fontWeight: 'bold', color: '#333' },
-    breadcrumbContainer: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 },
-    breadcrumbText: { fontSize: 14, color: '#999', fontWeight: '500' },
-    breadcrumbActive: { color: '#4A90E2', fontWeight: 'bold' },
+    container: { flex: 1, backgroundColor: '#F8FAFC' },
+    header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderColor: '#F1F5F9' },
+    backButton: { marginBottom: 12 },
+    backBtnText: { color: '#6366F1', fontSize: 14, fontWeight: '600' },
+    title: { fontSize: 24, fontWeight: '700', color: '#0F172A' },
+    breadcrumbContainer: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
+    breadcrumbText: { fontSize: 13, color: '#94A3B8', fontWeight: '500' },
+    breadcrumbActive: { color: '#334155', fontWeight: '700' },
     contentArea: { flex: 1 },
-    listPadding: { padding: 15 },
+    listPadding: { padding: 16 },
 
-    // Level 0: Box List
-    boxCard: { flex: 1, backgroundColor: '#FFF', margin: 8, padding: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
-    boxIcon: { fontSize: 32, marginBottom: 10 },
-    boxText: { fontSize: 16, fontWeight: 'bold', color: '#333', textAlign: 'center' },
+    boxCard: { flex: 1, backgroundColor: '#FFFFFF', margin: 8, paddingVertical: 24, borderRadius: 16, alignItems: 'center', justifyContent: 'center', shadowColor: '#64748B', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+    boxIcon: { fontSize: 32, marginBottom: 12 },
+    boxText: { fontSize: 15, fontWeight: '600', color: '#334155', textAlign: 'center' },
 
-    // Level 1: Warehouse Floor Plan
-    warehouseMap: { flex: 1, flexDirection: 'row', margin: 10, borderWidth: 2, borderColor: '#4A86C6' },
-    mapLeftSection: { flex: 2.5, padding: 10, borderRightWidth: 2, borderColor: 'rgba(255,255,255,0.3)' },
+    warehouseMap: { flex: 1, flexDirection: 'row', margin: 16, borderRadius: 24, padding: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 4, elevation: 1 },
+    mapLeftSection: { flex: 2.5, padding: 8, borderRightWidth: 1, borderColor: '#BAE6FD' },
+    sectionTitle: { fontSize: 12, fontWeight: '700', color: '#0369A1', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
+    inboundSection: { marginBottom: 12, paddingBottom: 12, borderBottomWidth: 1, borderColor: '#E0F2FE' },
+    inboundBox: { minWidth: 100, height: 50, marginRight: 12, paddingHorizontal: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFEDD5', borderRadius: 12 },
+    inboundText: { color: '#C2410C', fontSize: 11, fontWeight: '700' },
     subGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-    subBox: { width: '48%', height: 120, marginBottom: 10, padding: 10, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#D4B844', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 3, elevation: 3 },
-    subText: { fontSize: 10, fontWeight: 'bold', color: '#826A14', textAlign: 'center' },
-    stagingText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+    subBox: { width: '48%', height: 100, marginBottom: 12, padding: 12, justifyContent: 'center', alignItems: 'center', borderRadius: 16, shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 4, elevation: 1 },
+    subText: { fontSize: 12, fontWeight: '600', color: '#A16207', textAlign: 'center' },
    
-    // Level 2: Sub-Warehouse (Bins)
-    zoomSubContainer: { flex: 1, margin: 15, padding: 15, backgroundColor: '#FFFDE7', borderRadius: 12, borderWidth: 1, borderColor: '#FDE282' },
-    zoomTitle: { fontSize: 18, fontWeight: 'bold', color: '#826A14', marginBottom: 15, textAlign: 'center' },
+    mapRightSection: { flex: 1, flexDirection: 'row', paddingLeft: 8 },
+    stagingColumn: { flex: 1, justifyContent: 'space-around', paddingVertical: 8, paddingRight: 8 },
+    gateColumn: { width: 45, justifyContent: 'space-around', alignItems: 'flex-end', paddingVertical: 8 },
+    stagingBox: { flex: 1, width: '100%', marginVertical: 6, justifyContent: 'center', alignItems: 'center', borderRadius: 12 },
+    stagingText: { color: '#047857', fontSize: 10, fontWeight: '700' },
+    gateBox: { width: 32, height: 70, marginVertical: 6, justifyContent: 'center', alignItems: 'center', borderRadius: 10 },
+    gateText: { color: '#BE123C', fontSize: 10, fontWeight: '700' },
+
+    zoomSubContainer: { flex: 1, backgroundColor: '#FFFFFF', margin: 16, borderRadius: 24, padding: 20 },
+    zoomHeader: { marginBottom: 24 },
+    zoomTitle: { fontSize: 20, fontWeight: '700', color: '#1E293B' },
+    zoomSubtitle: { fontSize: 13, color: '#64748B', marginTop: 4 },
     binsGridWrapper: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-    binDetailBox: { width: '30%', backgroundColor: '#FFF', padding: 15, marginBottom: 15, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#E6C653', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
-    binDetailIcon: { fontSize: 24, marginBottom: 5 },
-    binDetailText: { fontSize: 14, fontWeight: 'bold', color: '#555', textAlign: 'center' },
+    binDetailBox: { width: '47%', backgroundColor: '#F8FAFC', padding: 16, marginBottom: 16, borderRadius: 16, alignItems: 'center' },
+    binDetailIconWrapper: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center', marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 4, elevation: 1 },
+    binDetailIcon: { fontSize: 20 },
+    binDetailText: { fontSize: 14, fontWeight: '600', color: '#334155', textAlign: 'center' },
 
-    // Level 3: Bin (Pallets Grid)
-    zoomBinContainer: { flex: 1 },
-    infoBar: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#FFF', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth:1, borderColor: '#EEE' },
-    subtitle: { fontSize: 14, color: '#777', fontWeight: '500' },
-    refreshBtn: { color: '#4A90E2', fontSize: 13, fontWeight: 'bold' },
-    legendContainer: { flexDirection: 'row', justifyContent: 'space-evenly', marginVertical: 10, paddingHorizontal: 10 },
+    zoomBinContainer: { flex: 1, backgroundColor: '#FFFFFF' },
+    infoBar: { paddingHorizontal: 24, paddingVertical: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderColor: '#F1F5F9' },
+    infoBarTitle: { fontSize: 16, fontWeight: '700', color: '#1E293B' },
+    infoBarSubtitle: { fontSize: 12, color: '#64748B', marginTop: 4 },
+    refreshBtnContainer: { backgroundColor: '#F1F5F9', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+    refreshBtn: { color: '#4F46E5', fontSize: 12, fontWeight: '600' },
+    
+    legendContainer: { flexDirection: 'row', justifyContent: 'center', gap: 16, paddingVertical: 16 },
     legendItem: { flexDirection: 'row', alignItems: 'center' },
-    legendBox: { width: 16, height: 16, borderRadius: 4, marginRight: 6 },
-    legendText: { fontSize: 12, color: '#555' },
-    palletGridContent: { alignItems: 'center', paddingBottom: 30 },
-    palletSeat: { width: 50, height: 50, margin: 6, borderRadius: 8, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
-    palletSeatText: { fontSize: 10, fontWeight: 'bold', color: '#FFF' },
-
-    // Modal
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-    modalContent: { backgroundColor: '#FFF', padding: 24, borderTopLeftRadius: 20, borderTopRightRadius: 20, minHeight: 300 },
-    modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#333' },
-    divider: { height: 1, backgroundColor: '#EEE', marginVertical: 12 },
-    modalLabel: { fontSize: 14, color: '#777', marginBottom: 8 },
-    modalValue: { fontSize: 16, fontWeight: '600', color: '#333' },
-    closeButton: { marginTop: 24, backgroundColor: '#4A90E2', padding: 16, borderRadius: 12, alignItems: 'center' },
-    closeButtonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-    itemListContainer: { backgroundColor: '#F9F9F9', padding: 10, borderRadius: 8, maxHeight: 150 },
-    itemRow: { flexDirection: 'row', marginBottom: 8, alignItems: 'flex-start' },
-    itemDot: { fontSize: 16, color: '#4A90E2', marginRight: 8, marginTop: -2 },
-    itemName: { fontSize: 14, fontWeight: '600', color: '#333' },
-    itemDetail: { fontSize: 12, color: '#777' },
-    inboundSection: {
-        marginBottom: 10,
-        paddingBottom: 10,
-        borderBottomWidth: 1,
-        borderColor: 'rgba(255,255,255,0.3)'
+    legendBox: { width: 12, height: 12, borderRadius: 4, marginRight: 8 },
+    legendText: { fontSize: 12, color: '#64748B', fontWeight: '500' },
+ 
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.4)', justifyContent: 'flex-end' },
+    modalContent: { backgroundColor: '#FFFFFF', paddingHorizontal: 24, paddingBottom: 32, paddingTop: 12, borderTopLeftRadius: 24, borderTopRightRadius: 24, minHeight: 380 },
+    modalDragIndicator: { width: 40, height: 4, backgroundColor: '#E2E8F0', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
+    modalTitle: { fontSize: 20, fontWeight: '700', color: '#0F172A', marginBottom: 16 },
+    modalDataRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderColor: '#F1F5F9' },
+    modalLabel: { fontSize: 14, color: '#64748B' },
+    modalValue: { fontSize: 14, fontWeight: '600', color: '#1E293B' },
+    
+    modalListTitle: { fontSize: 15, fontWeight: '700', color: '#1E293B', marginTop: 24, marginBottom: 12 },
+    itemListContainer: { maxHeight: 180 },
+    itemCard: { backgroundColor: '#F8FAFC', padding: 12, borderRadius: 12, marginBottom: 8 },
+    itemName: { fontSize: 14, fontWeight: '600', color: '#334155', marginBottom: 4 },
+    itemDetail: { fontSize: 12, color: '#64748B' },
+    emptyDetail: { fontSize: 13, color: '#94A3B8', fontStyle: 'italic', textAlign: 'center', marginTop: 10 },
+    
+    closeButton: { marginTop: 24, backgroundColor: '#6366F1', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
+    closeButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+   
+ 
+    // Perkecil ukuran font dasar, tapi manfaatkan adjustsFontSizeToFit di komponen Text
+     palletWeekText: { fontSize: 8, fontWeight: '600', textAlign: 'center', marginBottom: 2, opacity: 0.8 },
+    
+    palletGridContent: { 
+        paddingBottom: 40, 
+        paddingTop: 16, 
+        paddingHorizontal: 12 
     },
-    inboundBox: {
-        width: 80,
-        height: 60,
-        marginRight: 10,
-        padding: 10,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 2,
-        borderColor: '#E65100',
-        borderRadius: 4,
-    },
-    sectionTitle: {
-        fontSize: 12,
-        fontWeight: 'bold',
-        color: '#FFF',
-        marginBottom: 8,
-        letterSpacing: 1
-    },
-    stagingGateWrapper: { 
-        flexDirection: 'row', // Memastikan Staging di kiri, Gate di kanan
-        alignItems: 'center', 
-        justifyContent: 'flex-end', 
-        height: '25%',
-        marginBottom: 10
-    },
-  
-    mapRightSection: { 
+    palletSeat: { 
         flex: 1, 
-        flexDirection: 'row', // Membagi area kanan jadi kiri-kanan
-        paddingLeft: 10 
-    },
-    stagingColumn: {
-        flex: 1,
-        justifyContent: 'space-around',
+        margin: 5, 
+        minHeight: 64, // Dibuat sedikit lebih tinggi agar lega
+        borderRadius: 12, // Sudut melengkung modern
         paddingVertical: 10,
-        paddingRight: 10,
-    },
-    gateColumn: {
-        width: 50, // Ruang khusus gate di ujung kanan
-        justifyContent: 'space-around',
-        alignItems: 'flex-end',
-        paddingVertical: 10,
-    },
-    stagingBox: { 
-        width: 35, // Dibuat lebih besar dan tebal
-        height: 80, // Tinggi lebih besar agar muat diklik
-        flex: 1, // Otomatis mengisi tinggi yang tersedia
-        marginVertical: 5,
+        paddingHorizontal: 8,
         justifyContent: 'center', 
-        alignItems: 'center', 
-        borderWidth: 1, 
-        borderColor: '#5A8F35',
-        borderRadius: 4,
-    },
-    gateBox: { 
-        width: 35, // Dibuat lebih besar dan tebal
-        height: 80, // Tinggi lebih besar agar muat diklik
-        marginVertical: 5,
-        justifyContent: 'center',
         alignItems: 'center',
-        borderWidth: 1, 
-        borderColor: '#CC0000',
-        borderRadius: 2,
+    },
+    // Efek shadow 3D halus khusus untuk pallet yang ada isinya
+    palletSeatActive: {
+        shadowColor: '#64748B', 
+        shadowOffset: { width: 0, height: 2 }, 
+        shadowOpacity: 0.08, 
+        shadowRadius: 4, 
+        elevation: 1,
+    },
+    palletSeatText: { 
+        fontSize: 10, 
+        fontWeight: '700', 
+        textAlign: 'center', 
+        width: '100%',
+        letterSpacing: 0.3, // Jarak antar huruf agar lebih elegan
+    },
+    skuList: { 
+        marginTop: 6, 
+        paddingTop: 6,
+        width: '100%', 
+        alignItems: 'flex-start',
+        borderTopWidth: 1, // Garis pemisah minimalis
+    },
+    skuText: { 
+        fontSize: 7, 
+        fontWeight: '600', 
+        lineHeight: 12,
+        width: '100%', 
+        opacity: 0.85, // Warna sedikit diredupkan agar tidak menyaingi ID Pallet
     },
 });
 
